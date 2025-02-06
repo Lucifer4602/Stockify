@@ -60,7 +60,7 @@ cd streamlit_app
 4. Run the app
 
 ```bash
-streamlit run 00_😎_Main.py
+streamlit run app.py
 ```
 
 The app will be live at ```http://localhost:8501```
