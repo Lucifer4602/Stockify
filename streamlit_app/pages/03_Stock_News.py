@@ -1,38 +1,90 @@
 import streamlit as st
 import yfinance as yf
 import requests
-import json
+from datetime import datetime, timedelta
 
-def fetch_yahoo_finance_news(ticker="AAPL"):
-    """
-    Fetch live finance news using Yahoo Finance.
-    This example focuses on a specific stock ticker like 'AAPL' for Apple.
-    """
-    ticker_obj = yf.Ticker(ticker)
-    news = ticker_obj.news  # Get news related to the ticker
-    return news
+# ✅ Your Finnhub API Key
+FINNHUB_API_KEY = "d2n5gg9r01qn3vmjhargd2n5gg9r01qn3vmjhas0"
 
-# Streamlit app
-st.set_page_config(page_title="Yahoo Finance Live News", layout="wide")
-st.title("📊 Yahoo Finance: Live Financial News")
+@st.cache_data(ttl=3600)
+def fetch_yahoo_news(ticker: str):
+    """Attempt to fetch news from Yahoo Finance unofficial API."""
+    url = f"https://query2.finance.yahoo.com/v6/finance/news?symbols={ticker}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    resp = requests.get(url, headers=headers)
+    if resp.status_code == 200:
+        try:
+            news = resp.json()
+            if isinstance(news, dict):
+                return news.get("items") or news.get("news") or []
+        except ValueError:
+            return None
+    return None
 
-# Sidebar for stock ticker input
-st.sidebar.header("Choose Stock Ticker")
-ticker = st.sidebar.text_input("Enter Stock Ticker (e.g., AAPL, TSLA):", "AAPL")
+@st.cache_data(ttl=3600)
+def fetch_finnhub_news(ticker: str):
+    """Fetch company news from Finnhub (fallback)."""
+    today = datetime.utcnow().date()
+    last_week = today - timedelta(days=7)
+    url = (
+        f"https://finnhub.io/api/v1/company-news"
+        f"?symbol={ticker}"
+        f"&from={last_week}"
+        f"&to={today}"
+        f"&token={FINNHUB_API_KEY}"
+    )
+    resp = requests.get(url)
+    if resp.status_code == 200:
+        try:
+            return resp.json()
+        except ValueError:
+            return []
+    return []
+
+def format_unix_timestamp(ts):
+    try:
+        return datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d %I:%M %p")
+    except Exception:
+        return str(ts)
+
+# Streamlit UI
+st.set_page_config(page_title="Live Stock News", layout="wide")
+st.title("📊 Live Financial News")
+
+st.sidebar.header("Stock Ticker")
+ticker = st.sidebar.text_input("Enter Stock Ticker", value="AAPL").upper()
 
 st.sidebar.markdown("---")
-st.sidebar.info("Get the latest financial news from Yahoo Finance for the chosen stock ticker.")
+st.sidebar.write("News will be fetched from Yahoo Finance if available, otherwise Finnhub (fallback).")
 
-# Fetch and display news
-st.subheader(f"Live News for {ticker.upper()}")
-news_data = fetch_yahoo_finance_news(ticker)
+st.subheader(f"Live News for {ticker}")
 
-if news_data:
-    for news_item in news_data:
-        st.markdown(f"### {news_item['title']}")
-        st.write(news_item["publisher"])
-        st.write(f"Published: {news_item['providerPublishTime']}")
-        st.write(f"[Read more]({news_item['link']})")
+# First try Yahoo
+news_data = fetch_yahoo_news(ticker)
+
+# If Yahoo fails, fall back to Finnhub
+if not news_data:
+    st.warning("Yahoo news unavailable or blocked. Falling back to Finnhub.")
+    news_items = fetch_finnhub_news(ticker)
+    source = "Finnhub"
+else:
+    news_items = news_data
+    source = "Yahoo"
+
+if news_items:
+    for item in news_items:
+        # Handle both Yahoo and Finnhub formats
+        title = item.get("title") or item.get("headline") or "No Title Available"
+        link = item.get("link") or item.get("url")
+        publisher = item.get("publisher") or item.get("source", "Unknown Publisher")
+        ts = item.get("providerPublishTime") or item.get("datetime")
+        published = format_unix_timestamp(ts) if ts else "N/A"
+
+        st.markdown(f"### {title}")
+        st.write(f"**Publisher:** {publisher}")
+        st.write(f"**Published:** {published}")
+        if link:
+            st.write(f"[Read more]({link})")
         st.markdown("---")
 else:
-    st.info("No news articles available for this ticker at the moment.")
+    st.info(f"No news articles found via {source}.")
